@@ -27,9 +27,11 @@ def plot_median_plus_example(x_mat, x_coord, ylim, xlim, label, doExample, thisA
     return thisAx.get_ylim()
 
 from scipy.stats import mannwhitneyu
-def plot_diff_plus_mannwhitneyu(x_mat, y_mat, x_coord, ylim, xlim, label, thisAx, color=[1,1,0], lineType='-', linewidth=4):
+def plot_diff_plus_mannwhitneyu(x_mat, y_mat, x_coord, ylim, xlim, label, thisAx, siglist = [-1], color=[1,1,0], lineType='-', linewidth=4):
     # rows are repeats, columns are time stamps
     # Mann Whitney U tests for 'less': x<y
+    # siglist is used for multiple comparison scenario
+
     rect = thisAx.patch
     rect.set_alpha(0)
 
@@ -40,12 +42,21 @@ def plot_diff_plus_mannwhitneyu(x_mat, y_mat, x_coord, ylim, xlim, label, thisAx
     print(x_mu)
     print(y_mu)
     thisAx.plot(x_coord, diff, lineType, color=color, label=label, linewidth=linewidth)
-    test_stat = mannwhitneyu(x_mat, y_mat, axis = 0, alternative = 'less', nan_policy = 'omit') #
-    print(test_stat)
-    for (x, thisDiff, thisStat) in zip(x_coord, diff, test_stat.pvalue):
-        if thisStat <= 0.05:
-            # thisAx.text(x*.8, thisDiff, '%1.2f' % thisStat)
-            thisAx.text(x*.9, thisDiff, '*', fontsize = 20, color = color)
+
+    if siglist[0] == -1:
+        test_stat = mannwhitneyu(x_mat, y_mat, axis = 0, alternative = 'two-sided', nan_policy = 'omit') #
+        print(test_stat)
+        for (x, thisDiff, thisStat) in zip(x_coord, diff, test_stat.pvalue):
+            if thisStat <= 0.05:#
+                # thisAx.text(x*.8, thisDiff, '%1.2f' % thisStat)
+                thisAx.text(x*.9, thisDiff, '*', fontsize = 20, color = color)
+                # thisAx.text(x*.9, thisDiff+1, '%1.2f\n*' % thisStat, fontsize = 10, color = color)
+    else:
+        for (x, thisDiff, thisSig) in zip(x_coord, diff, siglist):
+            if thisSig:#0.05
+                # thisAx.text(x*.8, thisDiff, '%1.2f' % thisStat)
+                thisAx.text(x*.9, thisDiff, '*', fontsize = 20, color = color)
+                # thisAx.text(x*.9, thisDiff+1, '%1.2f\n*' % thisStat, fontsize = 10, color = color)
     
     if not ylim == 0:
         thisAx.set_ylim(ylim)

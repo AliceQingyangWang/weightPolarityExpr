@@ -59,7 +59,6 @@ def get_train_param(expr_name):
     else:
         raise NameError('Wrong expr name specified!')
 
-
 def train_model(model, num_epoch, expr_name, ds_train, ds_test, callback_list, gpuNum, **kwargs):
     if 'start_epoch' in kwargs:
         start_epoch = kwargs['start_epoch']
@@ -78,6 +77,11 @@ def train_model(model, num_epoch, expr_name, ds_train, ds_test, callback_list, g
 
     with tf.device(device_name):#'/GPU:0'  
         lr, loss_fn = get_train_param(expr_name)   
+        if 'lr' in kwargs: # will overwrite lr, this is for hyperparam tuning
+            from ray.tune.integration.keras import TuneReportCallback
+            lr = kwargs['lr']
+            callback_list = callback_list + [TuneReportCallback({"mean_train": "accuracy", "mean_val":"val_accuracy"})]
+
         model.compile(
             optimizer=tf.keras.optimizers.Adam(lr),
             loss=loss_fn,
@@ -111,44 +115,84 @@ def eachIter_dualCond(log_dir, chkpt_dir, model_config, ds_train, ds_test, num_e
         ds_train_freeze = ds_train
         ds_train_liquid = ds_train
 
-    # prepare for freeze
-    model_init_freeze = define_model(model_config, gpuNum)
-    tensorboard_callback_freeze = tf.keras.callbacks.TensorBoard(log_dir=log_dir.format(typeStr = 'freeze'), write_graph=False, update_freq='epoch', histogram_freq = int(doLog)) # if log the weights here, it will overwrite
-    cp_callback_freeze = tf.keras.callbacks.ModelCheckpoint(
-        chkpt_dir.format(typeStr = 'freeze') + "/cp-{epoch:04d}.ckpt",
-        monitor = 'val_accuracy',
-        save_best_only=False,
-        verboe=0,
-        save_weights_only=True,
-        save_freq = 'epoch',
-        period = ckpt_freq
-    )
-    if 'doRandInit' in kwargs:
-        wf_callback = weightFreeze.weightFreeze(ds_train_freeze, ds_test, log_dir.format(typeStr = 'freeze'), resetType, True, doLog, doLog, doRandInit = kwargs['doRandInit'])
-    if doLog: # if log batch info, won't use tensorboard callback at all as it will always overwrite weight here no matter what. 
-        callback_list_freeze = [wf_callback, cp_callback_freeze]
+    fzlist = []
+    if 'no_freeze' in kwargs:
+        no_freeze = kwargs['no_freeze']
     else:
-        callback_list_freeze = [wf_callback, tensorboard_callback_freeze, cp_callback_freeze]
+        no_freeze = False
+    if 'no_liquid' in kwargs:
+        no_liquid = kwargs['no_liquid']
+    else:
+        no_liquid = False
 
-    # prepare for liquid
-    model_init_liquid = tf.keras.models.clone_model(model_init_freeze)
-    model_init_liquid.set_weights(model_init_freeze.get_weights())
-    tensorboard_callback_liquid = tf.keras.callbacks.TensorBoard(log_dir=log_dir.format(typeStr = 'liquid'), write_graph=False, update_freq='epoch', histogram_freq = int(doLog)) # writing image does take a long time....
-    cp_callback_liquid = tf.keras.callbacks.ModelCheckpoint(
-        chkpt_dir.format(typeStr = 'liquid') + "/cp-{epoch:04d}.ckpt",
-        monitor = 'val_accuracy',
-        save_best_only=False,
-        verboe=0,
-        save_weights_only=True,
-        save_freq = 'epoch',
-        period = ckpt_freq
-    )
-    if 'doRandInit' in kwargs:
-        wf_callback = weightFreeze.weightFreeze(ds_train_liquid, ds_test, log_dir.format(typeStr = 'liquid'), resetType, False, doLog, doLog, doRandInit = kwargs['doRandInit'])
-    if doLog:
-        callback_list_liquid = [wf_callback, cp_callback_liquid]
-    else:    
-        callback_list_liquid = [wf_callback, tensorboard_callback_liquid, cp_callback_liquid]
+    model_init = define_model(model_config, gpuNum)
+
+    if not no_freeze:
+        fzlist += ['freeze']
+        # prepare for freeze
+        model_init_freeze = model_init
+        tensorboard_callback_freeze = tf.keras.callbacks.TensorBoard(log_dir=log_dir.format(typeStr = 'freeze'), write_graph=False, update_freq='epoch', histogram_freq = int(doLog)) # if log the weights here, it will overwrite
+        if ckpt_freq==0:
+            cp_callback_freeze = tf.keras.callbacks.ModelCheckpoint(
+                chkpt_dir.format(typeStr = 'freeze') + "/best",
+                monitor = 'val_accuracy',
+                mode='max',
+                save_best_only= True,
+                verboe=0,
+                save_weights_only=True
+            )
+        else:
+            cp_callback_freeze = tf.keras.callbacks.ModelCheckpoint(
+                chkpt_dir.format(typeStr = 'freeze') + "/cp-{epoch:04d}.ckpt",
+                monitor = 'val_accuracy',
+                save_best_only= False,
+                verboe=0,
+                save_weights_only=True,
+                save_freq = 'epoch',
+                period = ckpt_freq
+            )
+
+        if 'doRandInit' in kwargs:
+            wf_callback = weightFreeze.weightFreeze(ds_train_freeze, ds_test, log_dir.format(typeStr = 'freeze'), resetType, True, doLog, doLog, doRandInit = kwargs['doRandInit'])
+        if doLog: # if log batch info, won't use tensorboard callback at all as it will always overwrite weight here no matter what. 
+            callback_list_freeze = [wf_callback, cp_callback_freeze]
+        else:
+            callback_list_freeze = [wf_callback, tensorboard_callback_freeze, cp_callback_freeze]
+
+    if not no_liquid:
+        fzlist += ['liquid']
+        # prepare for liquid
+        if not no_freeze: # need to copy model
+            model_init_liquid = tf.keras.models.clone_model(model_init_freeze)
+            model_init_liquid.set_weights(model_init_freeze.get_weights())
+        else:
+            model_init_liquid = model_init # saves some memory space
+        tensorboard_callback_liquid = tf.keras.callbacks.TensorBoard(log_dir=log_dir.format(typeStr = 'liquid'), write_graph=False, update_freq='epoch', histogram_freq = int(doLog)) # writing image does take a long time....
+        if ckpt_freq==0:
+            cp_callback_liquid = tf.keras.callbacks.ModelCheckpoint(
+                chkpt_dir.format(typeStr = 'liquid') + "/best",
+                monitor = 'val_accuracy',
+                mode='max',
+                save_best_only= True,
+                verboe=0,
+                save_weights_only=True
+            )
+        else:        
+            cp_callback_liquid = tf.keras.callbacks.ModelCheckpoint(
+                chkpt_dir.format(typeStr = 'liquid') + "/cp-{epoch:04d}.ckpt",
+                monitor = 'val_accuracy',
+                save_best_only= False,
+                verboe=0,
+                save_weights_only=True,
+                save_freq = 'epoch',
+                period = ckpt_freq
+            )
+        if 'doRandInit' in kwargs:
+            wf_callback = weightFreeze.weightFreeze(ds_train_liquid, ds_test, log_dir.format(typeStr = 'liquid'), resetType, False, doLog, doLog, doRandInit = kwargs['doRandInit'])
+        if doLog:
+            callback_list_liquid = [wf_callback, cp_callback_liquid]
+        else:    
+            callback_list_liquid = [wf_callback, tensorboard_callback_liquid, cp_callback_liquid]
 
     if doEarlyStopping:
         early_stopping_callback = tf.keras.callbacks.EarlyStopping(
@@ -173,12 +217,21 @@ def eachIter_dualCond(log_dir, chkpt_dir, model_config, ds_train, ds_test, num_e
     else:
         raise NameError('No match between model config and expr name!')
 
+    ## Add reuse from another checkpoint by string
+    if 'ckpt_load_path' in kwargs:
+        ckpt_path = kwargs['ckpt_load_path']
+        for typeStr in fzlist:
+            if typeStr == 'freeze':
+                model_init_freeze.load_weights(ckpt_path)
+            else:
+                model_init_liquid.load_weights(ckpt_path)
+
     ## This part adds for picking up from previous training. 
     start_epoch = 0 # epoch is 0-start despite how the checkpoints appear!!
     if 'start_epoch' in kwargs:
         start_epoch = kwargs['start_epoch']
         if not start_epoch == 0: # asks for loading the checkpoints!
-            for typeStr in ['freeze', 'liquid']:
+            for typeStr in fzlist:
                 ckpt_path = chkpt_dir.format(typeStr = typeStr) + "/cp-{epoch:04d}.ckpt".format(epoch = start_epoch)
                 ckpts = glob(ckpt_path + '.*')
                 if len(ckpts) > 0:
@@ -188,7 +241,12 @@ def eachIter_dualCond(log_dir, chkpt_dir, model_config, ds_train, ds_test, num_e
                         model_init_liquid.load_weights(ckpt_path)
                 else:
                     raiseExceptions('Requested checkpoint %d for %s doesnt exist!' % (start_epoch, typeStr))
-                            
-    model_freeze = train_model(model_init_freeze, num_epoch, expr_name, ds_train_freeze, ds_test, callback_list_freeze, gpuNum, start_epoch=start_epoch)
-    model_liquid = train_model(model_init_liquid, num_epoch, expr_name, ds_train_liquid, ds_test, callback_list_liquid, gpuNum, start_epoch=start_epoch)
-    return model_freeze, model_liquid
+    
+    if not no_freeze:
+        train_model(model_init_freeze, num_epoch, expr_name, ds_train_freeze, ds_test, callback_list_freeze, gpuNum, **kwargs); # the **kwargs will pass start_epoch & lr rate down!!
+    
+    # will reset liquid weight here to make sure it is exactly the same as freeze!
+    model_init_liquid.load_weights(chkpt_dir.format(typeStr = 'freeze') + "/cp-{epoch:04d}.ckpt".format(epoch=0))     
+    if not no_liquid:
+        train_model(model_init_liquid, num_epoch, expr_name, ds_train_liquid, ds_test, callback_list_liquid, gpuNum, **kwargs);
+    # return model_freeze, model_liquid

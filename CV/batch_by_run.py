@@ -8,11 +8,81 @@ from data_cv import data_cv
 
 def get_config(args):
     config = {}
+    config['runIter'] = args.runIter
     config['resetType'] = args.resetType
     config['batch_size'] = args.batch_size
     config['sample_size'] = args.sample_size
 
     return config
+
+def training_loop(config):
+    if 'args' in config:
+        args = config['args']
+
+    if 'sample_size_batch_size' in config:
+        config['sample_size'], config['batch_size'] = config['sample_size_batch_size']
+
+    set_gpu_config()
+
+    # Load data here
+    fashion_mnist = data_cv(args.baseFName, config['sample_size'])
+    ds_train_threaded = [fashion_mnist.get_train(), fashion_mnist.get_train()]
+    ds_val = fashion_mnist.get_test()
+    inputSize = 227
+    for ii in range(len(ds_train_threaded)):
+        ds_train_threaded[ii] = fashion_mnist.prepare_ds(ds_train_threaded[ii], inputSize, config['batch_size'], True)
+    ds_val = fashion_mnist.prepare_ds(ds_val, inputSize, config['batch_size'], False)
+
+    runIter = config['runIter'] #args.runIter
+
+    if args.doRandInit:
+        vanilla_trained_str = 'vanilla'
+    else:
+        vanilla_trained_str = 'pretrained'
+    if args.preTrained:
+        vanilla_trained_str = 'finetune'
+    if args.control:
+        vanilla_trained_str = 'ctrl'
+    
+    model_config = {}
+    model_config['mType'] = 'AlexNet'
+    model_config['pre_trained'] = args.preTrained 
+    if ~args.preTrained:#hard-coded for now.... For now it should never be true because you are not directly transfer traning, you are only using the polarities!!
+        model_config['channels'] = 3
+        model_config['image_width'] = 227
+        model_config['image_height'] = 227
+        model_config['num_classes'] = 10
+
+    # If you know you wanna continue training then set all args.num_epoch to 50 or the previous set epoch number. Otherwise it won't really pick up on that. 
+    # Okay I've actaully decided to take out e part in the naming entirely cuz it's just not necessary at all. Can tell that from reading the log files. 
+    if 'lr' in config: #tuning
+        kwargs = {'lr':config['lr']}
+        log_dir = os.path.join(os.getcwd(), args.baseFName, config['resetType'], 'logs', 's%dlr%1.6fbatch%d_%s' % (config['sample_size'], config['lr'], config['batch_size'], vanilla_trained_str), "r%d_{typeStr}" % runIter) 
+        checkpoint_path = os.path.join(os.getcwd(), args.baseFName, config['resetType'], 'checkpoints', 's%dlr%1.6fbatch%d_%s' % (config['sample_size'], config['lr'], config['batch_size'], vanilla_trained_str), "r%d_{typeStr}" % runIter)
+    else: # not tuning, probably won't use this part ever again cuz can always set the lr on the top part and just simply run more iterations. 
+        # log_dir = os.path.join(os.getcwd(), args.baseFName, config['resetType'], 'logs', 's%de%d_%s' % (config['sample_size'], args.num_epoch, vanilla_trained_str), "r%d_{typeStr}" % runIter) 
+        # checkpoint_path = os.path.join(os.getcwd(), args.baseFName, config['resetType'], 'checkpoints', 's%de%d_%s' % (config['sample_size'], args.num_epoch, vanilla_trained_str), "r%d_{typeStr}" % runIter)
+        # log_dir = os.path.join(os.getcwd(), args.baseFName, config['resetType'], 'logs', 's%de%d_%s' % (config['sample_size'], args.num_epoch, vanilla_trained_str), "r%d_{typeStr}" % runIter) 
+        # checkpoint_path = os.path.join(os.getcwd(), args.baseFName, config['resetType'], 'checkpoints', 's%de%d_%s' % (config['sample_size'], args.num_epoch, vanilla_trained_str), "r%d_{typeStr}" % runIter)
+        log_dir = os.path.join(os.getcwd(), args.baseFName, config['resetType'], 'logs', 's%d_%s' % (config['sample_size'], vanilla_trained_str), "r%d_{typeStr}" % runIter) 
+        checkpoint_path = os.path.join(os.getcwd(), args.baseFName, config['resetType'], 'checkpoints', 's%d_%s' % (config['sample_size'], vanilla_trained_str), "r%d_{typeStr}" % runIter)
+    
+    if args.control:
+        ckpt_load_path = os.path.join(os.getcwd(), args.baseFName, config['resetType'], 'checkpoints', 's%de%d_%s' % (config['sample_size'], 50, 'pretrained'), "r%d_%s" % (runIter, 'freeze'),  "cp-{epoch:04d}.ckpt".format(epoch = 0)) 
+        eachIter_dualCond(log_dir, checkpoint_path, model_config, ds_train_threaded, ds_val, args.num_epoch, config['resetType'], 
+                            args.doBatchLog, args.gpu_num, args.doEarlyStopping, doRandInit = args.doRandInit, 
+                            start_epoch = args.start_epoch, ckpt_freq = args.ckpt_freq, 
+                            no_freeze = args.no_freeze, no_liquid = args.no_liquid, ckpt_load_path = ckpt_load_path, **kwargs);
+    else:
+        eachIter_dualCond(log_dir, checkpoint_path, model_config, ds_train_threaded, ds_val, args.num_epoch, config['resetType'], 
+                            args.doBatchLog, args.gpu_num, args.doEarlyStopping, doRandInit = args.doRandInit, 
+                            start_epoch = args.start_epoch, ckpt_freq = args.ckpt_freq, 
+                            no_freeze = args.no_freeze, no_liquid = args.no_liquid, **kwargs)
+     
+    f_name = os.path.join(os.getcwd(), args.baseFName.split(os.path.sep)[0], 'status.txt')
+    with open(f_name, 'a') as f:
+        f.write('%ss%d_%s_run%d\n' % (config['resetType'], config['sample_size'], vanilla_trained_str, runIter))
+    print('expr_run%d_' % ((runIter+1)) + 'is done')
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -100,6 +170,24 @@ if __name__ == "__main__":
         required=False,
         help='how often checkpoints should be saved. If saved for every epoch, the file system will explode. '
     )
+    parser.add_argument(
+        "--control",
+        default='False',
+        required=False,
+        help="whether doing control experiment, i.e. LIQUID sufficient-Polarity"
+    )
+    parser.add_argument(
+        "--no_freeze",
+        default='False',
+        required=False,
+        help="if True, will not run freeze experiment"
+    )    
+    parser.add_argument(
+        "--no_liquid",
+        default='False',
+        required=False,
+        help="if True, will not run liquid experiment"
+    )    
     args, _ = parser.parse_known_args()
     if isinstance(args.doBatchLog, str):
         args.doBatchLog = args.doBatchLog=='True'
@@ -109,44 +197,12 @@ if __name__ == "__main__":
         args.doEarlyStopping = args.doEarlyStopping=='True'
     if isinstance(args.preTrained, str):
         args.preTrained = args.preTrained=='True'
+    if isinstance(args.control, str):
+        args.control = args.control=='True'
+    if isinstance(args.no_freeze, str):
+        args.no_freeze = args.no_freeze=='True'
+    if isinstance(args.no_liquid, str):
+        args.no_liquid = args.no_liquid=='True'
     config = get_config(args)
 
-    set_gpu_config()
-
-    # Load data here
-    fashion_mnist = data_cv(args.baseFName, config['sample_size'])
-    ds_train_threaded = [fashion_mnist.get_train(), fashion_mnist.get_train()]
-    ds_val = fashion_mnist.get_test()
-    inputSize = 227
-    for ii in range(len(ds_train_threaded)):
-        ds_train_threaded[ii] = fashion_mnist.prepare_ds(ds_train_threaded[ii], inputSize, config['batch_size'], True)
-    ds_val = fashion_mnist.prepare_ds(ds_val, inputSize, config['batch_size'], False)
-
-    runIter = args.runIter
-
-    if args.doRandInit:
-        vanilla_trained_str = 'vanilla'
-    else:
-        vanilla_trained_str = 'pretrained'
-    if args.preTrained:
-        vanilla_trained_str = 'finetune'
-    # log_dir = os.path.join(os.getcwd(), args.baseFName, config['resetType'], 'logs', 's%de%d_%s' % (config['sample_size'], args.num_epoch, vanilla_trained_str), "r%d_{typeStr}" % runIter) 
-    # checkpoint_path = os.path.join(os.getcwd(), args.baseFName, config['resetType'], 'checkpoints', 's%de%d_%s' % (config['sample_size'], args.num_epoch, vanilla_trained_str), "r%d_{typeStr}" % runIter)
-    log_dir = os.path.join(os.getcwd(), args.baseFName, config['resetType'], 'logs', 's%de%d_%s' % (config['sample_size'], 50, vanilla_trained_str), "r%d_{typeStr}" % runIter) 
-    checkpoint_path = os.path.join(os.getcwd(), args.baseFName, config['resetType'], 'checkpoints', 's%de%d_%s' % (config['sample_size'], 50, vanilla_trained_str), "r%d_{typeStr}" % runIter)
-    
-    model_config = {}
-    model_config['mType'] = 'AlexNet'
-    model_config['pre_trained'] = args.preTrained
-    if ~args.preTrained:#hard-coded for now.... For now it should never be true because you are not directly transfer traning, you are only using the polarities!!
-        model_config['channels'] = 3
-        model_config['image_width'] = 227
-        model_config['image_height'] = 227
-        model_config['num_classes'] = 10
-    
-    model_freeze, model_liquid = eachIter_dualCond(log_dir, checkpoint_path, model_config, ds_train_threaded, ds_val, args.num_epoch, config['resetType'], args.doBatchLog, args.gpu_num, args.doEarlyStopping, doRandInit = args.doRandInit, start_epoch = args.start_epoch, ckpt_freq = args.ckpt_freq)
-    
-    f_name = os.path.join(os.getcwd(), args.baseFName.split(os.path.sep)[0], 'status.txt')
-    with open(f_name, 'a') as f:
-        f.write('%ss%d_%s_run%d\n' % (config['resetType'], config['sample_size'], vanilla_trained_str, runIter))
-    print('expr_run%d_' % ((runIter+1)) + 'is done')
+    training_loop(config)

@@ -99,8 +99,8 @@ class weightFreeze(keras.callbacks.Callback):
 
     def on_train_begin(self, logs=None):
         # log accuracy before reset
-        train_logs = self.model.evaluate(self.train_data)
-        val_logs = self.model.evaluate(self.validation_data)
+        train_logs = self.model.evaluate(self.train_data, verbose=0)
+        val_logs = self.model.evaluate(self.validation_data, verbose=0)
         self._log_epoch_metrics(-2, {'accuracy':train_logs[1], 'val_accuracy':val_logs[1]}, '')
 
         # initial resetting will only happen if you are doing polarity freezing - because this is the only place you have to make sure you start with the correct one. the other scenario can always find its own place
@@ -111,7 +111,9 @@ class weightFreeze(keras.callbacks.Callback):
                 config_model.set_weights(self.model.get_weights()) # this ensures the last layer has the correct weights!
                 if not self.doRandInit:
                     config_model.load_weights_pickle()
-                            
+            # will do flip for the init polarity set so that the magnitude is exactly controlled between freeze and fluid
+            tmp_resetType = self.resetType
+            self.resetType = 'flip'
             for layer in self.model.layers:
                 if isinstance(layer, (keras.layers.Dense, keras.layers.Conv2D)):
                     [layer_weights, layer_bias] = layer.get_weights()
@@ -149,9 +151,10 @@ class weightFreeze(keras.callbacks.Callback):
                     layer.set_weights([layer_weights, layer_bias])
 
             del config_model
+            self.resetType = tmp_resetType
         # log accuracy after reset, before training
-        train_logs = self.model.evaluate(self.train_data)
-        val_logs = self.model.evaluate(self.validation_data)
+        train_logs = self.model.evaluate(self.train_data, verbose=0)
+        val_logs = self.model.evaluate(self.validation_data, verbose=0)
         self._log_epoch_metrics(-1, {'accuracy':train_logs[1], 'val_accuracy':val_logs[1]}, '')
         log_path = self._writers_dir['train'].split('/')
         log_path[-4] = 'checkpoints'
@@ -188,10 +191,9 @@ class weightFreeze(keras.callbacks.Callback):
                 tf.reduce_max(tensor),
                 tf.reduce_min(tensor)
             )
-        )
+        )          
 
-    def on_train_batch_end(self, batch, logs):
-       
+    def on_train_batch_end(self, batch, logs):        
         if self.logFreeW:# only log if actually freezing the weights, otherwise don't log at all 
             val_logs = self.model.evaluate(self.validation_data)
             val_logs = {'val_loss': val_logs[0], 'val_accuracy': val_logs[1]}
