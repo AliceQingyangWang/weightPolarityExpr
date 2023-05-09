@@ -4,3 +4,6 @@ CV/.DS_Store
 CV/__pycache__/*
 *.pkl
 .DS_Store
+CV/fashion_mnist/*
+*.npy
+.vscode

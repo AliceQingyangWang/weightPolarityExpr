@@ -13,7 +13,7 @@ if __name__ == "__main__":
         parser.add_argument(
                 "--doRandInit",
                 type=int, 
-                default=0, # do rand initialization by default
+                default=2, 
                 required=False,
                 help="0: do random initilizatoin for the freezing networks, vanilla; 1: NOT do randInit, preTrained polarity; 2: do all three combinations!"
         )
@@ -36,7 +36,7 @@ if __name__ == "__main__":
                 type=str,
                 default='',
                 required=False, 
-                help = 'base name if you need any'
+                help = 'base name if you need any. Corresponds to the dataset'
         )
         parser.add_argument(
                 "--resetType",
@@ -70,8 +70,26 @@ if __name__ == "__main__":
                 default=1,
                 type=int,
                 required=False,
-                help='how often checkpoints should be saved. If saved for every epoch, the file system will explode. '
+                help='how often checkpoints should be saved. If saved for every epoch, the file system will explode. 0: only logs the best'
         )        
+        parser.add_argument(
+                "--no_freeze",
+                default='False',
+                required=False,
+                help="if True, will not run freeze experiment"
+        )    
+        parser.add_argument(
+                "--no_liquid",
+                default='False',
+                required=False,
+                help="if True, will not run liquid experiment"
+        )   
+        parser.add_argument(
+                "--doEarlyStopping",
+                default='False',
+                required=False,
+                help="whether do early stopping for the runs"
+        )
         args, _ = parser.parse_known_args()
 
         config = {}

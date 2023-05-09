@@ -15,7 +15,7 @@ def get_row(array, keys, numRun, baseFName=''):
     num_epoch = this_row['num_epoch']
     for val_train in ['train', 'validation']:
         log_dir = os.path.join(os.getcwd(), baseFName, this_row['resetType'],
-                            'logs', 's%de%d_%s' % (this_row['train_sample'], 50, this_row['networkType']), 
+                            'logs', 's%d_%s' % (this_row['train_sample'], this_row['networkType']), 
                             "*_%s" % this_row['typeStr'], val_train, 'events*') #this_row['num_epoch'] #TODO
         pathList = glob(log_dir)
         epoch_acc = np.empty(shape=(numRun, num_epoch), dtype = np.float)

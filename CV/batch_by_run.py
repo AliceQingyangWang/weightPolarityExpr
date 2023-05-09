@@ -15,9 +15,13 @@ def get_config(args):
 
     return config
 
-def training_loop(config):
+def training_loop(config, **kwargs):
     if 'args' in config:
         args = config['args']
+    elif 'args' in kwargs:
+        args = kwargs['args']
+    else:
+        raise('No args problem!')
 
     if 'sample_size_batch_size' in config:
         config['sample_size'], config['batch_size'] = config['sample_size_batch_size']
@@ -41,8 +45,6 @@ def training_loop(config):
         vanilla_trained_str = 'pretrained'
     if args.preTrained:
         vanilla_trained_str = 'finetune'
-    if args.control:
-        vanilla_trained_str = 'ctrl'
     
     model_config = {}
     model_config['mType'] = 'AlexNet'
@@ -67,17 +69,10 @@ def training_loop(config):
         log_dir = os.path.join(os.getcwd(), args.baseFName, config['resetType'], 'logs', 's%d_%s' % (config['sample_size'], vanilla_trained_str), "r%d_{typeStr}" % runIter) 
         checkpoint_path = os.path.join(os.getcwd(), args.baseFName, config['resetType'], 'checkpoints', 's%d_%s' % (config['sample_size'], vanilla_trained_str), "r%d_{typeStr}" % runIter)
     
-    if args.control:
-        ckpt_load_path = os.path.join(os.getcwd(), args.baseFName, config['resetType'], 'checkpoints', 's%de%d_%s' % (config['sample_size'], 50, 'pretrained'), "r%d_%s" % (runIter, 'freeze'),  "cp-{epoch:04d}.ckpt".format(epoch = 0)) 
-        eachIter_dualCond(log_dir, checkpoint_path, model_config, ds_train_threaded, ds_val, args.num_epoch, config['resetType'], 
-                            args.doBatchLog, args.gpu_num, args.doEarlyStopping, doRandInit = args.doRandInit, 
-                            start_epoch = args.start_epoch, ckpt_freq = args.ckpt_freq, 
-                            no_freeze = args.no_freeze, no_liquid = args.no_liquid, ckpt_load_path = ckpt_load_path, **kwargs);
-    else:
-        eachIter_dualCond(log_dir, checkpoint_path, model_config, ds_train_threaded, ds_val, args.num_epoch, config['resetType'], 
-                            args.doBatchLog, args.gpu_num, args.doEarlyStopping, doRandInit = args.doRandInit, 
-                            start_epoch = args.start_epoch, ckpt_freq = args.ckpt_freq, 
-                            no_freeze = args.no_freeze, no_liquid = args.no_liquid, **kwargs)
+    eachIter_dualCond(log_dir, checkpoint_path, model_config, ds_train_threaded, ds_val, args.num_epoch, config['resetType'], 
+                        args.doBatchLog, args.gpu_num, args.doEarlyStopping, doRandInit = args.doRandInit, 
+                        start_epoch = args.start_epoch, ckpt_freq = args.ckpt_freq, 
+                        no_freeze = args.no_freeze, no_liquid = args.no_liquid, **kwargs)
      
     f_name = os.path.join(os.getcwd(), args.baseFName.split(os.path.sep)[0], 'status.txt')
     with open(f_name, 'a') as f:
@@ -171,12 +166,6 @@ if __name__ == "__main__":
         help='how often checkpoints should be saved. If saved for every epoch, the file system will explode. '
     )
     parser.add_argument(
-        "--control",
-        default='False',
-        required=False,
-        help="whether doing control experiment, i.e. LIQUID sufficient-Polarity"
-    )
-    parser.add_argument(
         "--no_freeze",
         default='False',
         required=False,
@@ -197,12 +186,10 @@ if __name__ == "__main__":
         args.doEarlyStopping = args.doEarlyStopping=='True'
     if isinstance(args.preTrained, str):
         args.preTrained = args.preTrained=='True'
-    if isinstance(args.control, str):
-        args.control = args.control=='True'
     if isinstance(args.no_freeze, str):
         args.no_freeze = args.no_freeze=='True'
     if isinstance(args.no_liquid, str):
         args.no_liquid = args.no_liquid=='True'
     config = get_config(args)
 
-    training_loop(config)
+    training_loop(config, args=args)
